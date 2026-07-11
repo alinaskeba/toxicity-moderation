@@ -1,32 +1,18 @@
-# Python
 .venv/
 __pycache__/
 *.pyc
 .ipynb_checkpoints/
-
-# Secrets
 .env
-
-# IDE
 .vscode/
 .idea/
-
-# Airflow runtime files
 airflow-logs/
 logs/
 *.db
 *.sqlite
 simple_auth_manager_passwords.json*
 airflow.cfg
-
-# MinIO local storage
 minio/data/
-
-# Generated datasets
 data/training_data.csv
-
-
-# OS files
 .DS_Store
 Thumbs.db
 data/training_data.csv
