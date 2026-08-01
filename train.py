@@ -1,11 +1,13 @@
 import json
 from pathlib import Path
-
+import mlflow
+import mlflow.sklearn
 import joblib
 import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
+    accuracy_score,
     classification_report,
     confusion_matrix,
     f1_score,
@@ -15,6 +17,7 @@ from sklearn.metrics import (
 )
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
+from sklearn.naive_bayes import MultinomialNB
 
 
 DATA_PATH = Path("data/training_data.csv")
@@ -62,15 +65,27 @@ def load_training_data(
     return df["text"], df["label"]
 
 
-def build_model() -> Pipeline:
-    """Create the baseline TF-IDF and Logistic Regression pipeline."""
+def build_model(model_type: str) -> Pipeline:
+
+    if model_type == "logistic":
+        classifier = LogisticRegression(
+            max_iter=1000,
+            class_weight="balanced",
+            random_state=RANDOM_STATE,
+        )
+
+    elif model_type == "naive_bayes":
+        classifier = MultinomialNB()
+
+    else:
+        raise ValueError(f"Unknown model: {model_type}")
 
     return Pipeline(
         steps=[
             (
                 "tfidf",
                 TfidfVectorizer(
-                    max_features=50_000,
+                    max_features=50000,
                     ngram_range=(1, 2),
                     min_df=2,
                     max_df=0.95,
@@ -78,15 +93,10 @@ def build_model() -> Pipeline:
             ),
             (
                 "classifier",
-                LogisticRegression(
-                    max_iter=1000,
-                    class_weight="balanced",
-                    random_state=RANDOM_STATE,
-                ),
+                classifier,
             ),
         ]
     )
-
 
 def evaluate_model(
     model: Pipeline,
@@ -108,6 +118,9 @@ def evaluate_model(
     print(report)
 
     metrics = {
+        "accuracy": float(
+            accuracy_score(y_test, y_pred)
+        ),
         "precision_toxic": float(
             precision_score(y_test, y_pred)
         ),
@@ -160,6 +173,9 @@ def save_artifacts(
 
 
 def main() -> None:
+    mlflow.set_tracking_uri("http://localhost:5000")
+    mlflow.set_experiment("toxicity-moderation")
+
     x, y = load_training_data(DATA_PATH)
 
     x_train, x_test, y_train, y_test = train_test_split(
@@ -173,24 +189,72 @@ def main() -> None:
     print(f"Training rows: {len(x_train)}")
     print(f"Testing rows: {len(x_test)}")
 
-    model = build_model()
+    models = {
+        "LogisticRegression": "logistic",
+        "NaiveBayes": "naive_bayes",
+    }
 
-    print("\nTraining model...")
-    model.fit(x_train, y_train)
+    best_model = None
+    best_metrics = None
+    best_name = None
+    best_f1 = -1
 
-    print("Training completed.")
+    for model_name, model_type in models.items():
 
-    metrics = evaluate_model(
-        model,
-        x_test,
-        y_test,
-    )
+        model = build_model(model_type)
+
+        with mlflow.start_run(run_name=model_name):
+
+            mlflow.log_param("algorithm", model_name)
+            mlflow.log_param("vectorizer", "TF-IDF")
+            mlflow.log_param("max_features", 50000)
+            mlflow.log_param("ngram_range", "(1,2)")
+            mlflow.log_param("min_df", 2)
+            mlflow.log_param("max_df", 0.95)
+            mlflow.log_param("test_size", TEST_SIZE)
+            mlflow.log_param("random_state", RANDOM_STATE)
+
+            print(f"\nTraining {model_name}...")
+
+            model.fit(x_train, y_train)
+
+            metrics = evaluate_model(
+                model,
+                x_test,
+                y_test,
+            )
+
+            mlflow.log_metric("accuracy", metrics["accuracy"])
+            mlflow.log_metric("precision_toxic", metrics["precision_toxic"])
+            mlflow.log_metric("recall_toxic", metrics["recall_toxic"])
+            mlflow.log_metric("f1_toxic", metrics["f1_toxic"])
+            mlflow.log_metric("roc_auc", metrics["roc_auc"])
+
+            mlflow.sklearn.log_model(
+                sk_model=model,
+                name="model",
+            )
+
+            save_artifacts(
+                model,
+                metrics,
+            )
+
+            mlflow.log_artifact(str(METRICS_PATH))
+
+            if metrics["f1_toxic"] > best_f1:
+                best_f1 = metrics["f1_toxic"]
+                best_model = model
+                best_metrics = metrics
+                best_name = model_name
+
+    print(f"Champion model: {best_name}")
+    print(f"Champion F1-score: {best_f1:.4f}")
 
     save_artifacts(
-        model,
-        metrics,
+        best_model,
+        best_metrics,
     )
-
 
 if __name__ == "__main__":
     main()

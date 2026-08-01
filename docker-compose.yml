@@ -16,7 +16,6 @@ services:
 
     command: server /data --console-address ":9001"
 
-
   airflow:
     image: apache/airflow:3.3.0
     container_name: airflow
@@ -46,3 +45,28 @@ services:
       - ./data/incoming:/opt/airflow/incoming
 
     command: standalone
+
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:latest
+    container_name: mlflow
+
+    depends_on:
+      - minio
+
+    ports:
+      - "5000:5000"
+
+    environment:
+      AWS_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY}
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+
+    command: >
+      mlflow server
+      --host 0.0.0.0
+      --port 5000
+      --backend-store-uri sqlite:///mlflow.db
+      --default-artifact-root s3://${MINIO_BUCKET}/mlflow
+
+    volumes:
+      - ./mlflow:/mlflow
