@@ -1,18 +1,21 @@
 from pathlib import Path
-
-import joblib
+import mlflow.sklearn
 from fastapi import FastAPI
 from pydantic import BaseModel
+import pandas as pd
+import os
 
+os.environ["AWS_ACCESS_KEY_ID"] = "admin"
+os.environ["AWS_SECRET_ACCESS_KEY"] = "password123"
+os.environ["MLFLOW_S3_ENDPOINT_URL"] = "http://localhost:9000"
 
-MODEL_PATH = Path("models/toxicity_model.joblib")
+mlflow.set_tracking_uri("http://localhost:5000")
 
-if not MODEL_PATH.exists():
-    raise FileNotFoundError(
-        "Model file not found. Run 'python train.py' first."
-    )
-
-model = joblib.load(MODEL_PATH)
+model = mlflow.sklearn.load_model(
+    "models:/toxicity-moderation-model@champion"
+)
+print(type(model))
+print(model)
 
 app = FastAPI()
 

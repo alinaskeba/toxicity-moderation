@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 import mlflow
 import mlflow.sklearn
+from mlflow import MlflowClient
 import joblib
 import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -175,6 +176,8 @@ def save_artifacts(
 def main() -> None:
     mlflow.set_tracking_uri("http://localhost:5000")
     mlflow.set_experiment("toxicity-moderation")
+    MODEL_NAME = "toxicity-moderation-model"
+    client = MlflowClient()
 
     x, y = load_training_data(DATA_PATH)
 
@@ -198,6 +201,7 @@ def main() -> None:
     best_metrics = None
     best_name = None
     best_f1 = -1
+    best_version = None
 
     for model_name, model_type in models.items():
 
@@ -230,10 +234,21 @@ def main() -> None:
             mlflow.log_metric("f1_toxic", metrics["f1_toxic"])
             mlflow.log_metric("roc_auc", metrics["roc_auc"])
 
-            mlflow.sklearn.log_model(
+            model_info = mlflow.sklearn.log_model(
                 sk_model=model,
                 name="model",
+                registered_model_name=MODEL_NAME,
             )
+            latest = client.search_model_versions(
+                f"name='{MODEL_NAME}'"
+            )
+
+            version = max(
+            latest,
+            key=lambda m: int(m.version),
+            ).version
+
+            print(f"Registered model version: {version}")
 
             save_artifacts(
                 model,
@@ -247,9 +262,20 @@ def main() -> None:
                 best_model = model
                 best_metrics = metrics
                 best_name = model_name
+                best_version = version
 
     print(f"Champion model: {best_name}")
     print(f"Champion F1-score: {best_f1:.4f}")
+
+    client.set_registered_model_alias(
+    MODEL_NAME,
+    "champion",
+    best_version,
+    )
+
+    print(
+        f"Champion alias assigned to version {best_version}"
+    )
 
     save_artifacts(
         best_model,
